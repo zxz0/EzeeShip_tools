@@ -1,16 +1,9 @@
 """
 	Todo:
-		save temp file
-	Date:
-		02/16/2019 (parse the excel file with correct format)
-		02/11/2019 (jsonify problem. keep it simple)
-		02/09/2019 (design class and relations: InfoGetter only get info from xls, EstimateRates get rate info, with other "POJO")
-		02/01/2019 (created, 
-			test example order rate estimate,
-			test real order rate estimate to make sure rate is right,
-			structure: main, handle .ini file, log system)
+		save temp file, config file adoption
 	Author: Zixuan Zhang
-	Function: get best price among several shipping method for different orders according to several rules, output to csv file as the original order
+	Function: 
+		get best price among several shipping method for different orders according to several rules, output to csv file as the original order
 	Usage: python compare.py products.csv
 """
 
@@ -23,61 +16,73 @@ import sys
 import xlrd
 import datetime
 
-'''class Address:
-	def __init__(self, country_code = 'US', state_code = 'CA', city = 'Rancho Cucamonga', address_line1 = '9370 7Th St, Ste G.', zip_code = '91730'):
-		self.info = {}
-		self.info['countryCode'] = country_code
-		self.info['stateCode'] = state_code
-		self.info['city'] = city
-		self.info['addressLine1'] = address_line1
-		self.info['zipCode'] = zip_code
-
-class Parcel:
-	def __init__(self):
-		self.info = {}
-
-	def __init__(self, length, width, height, weight, distance_unit = 'in', package_code = 'your_package', package_num = 1, mass_unit = 'lb'):
-		self.info = {}
-		self.info['lenth'] = length
-		self.info['width'] = width
-		self.info['height'] = height
-		self.info['weight'] = weight
-		self.info['packageCode'] = packageCode
-		self.info['packageNum'] = package_num
-		self.info['massUnit'] = mass_unit'''
-
-class Validator:
-	def __init__(self):
-		# address can be validate later using API
-		self.country_code = ('BD', 'BE', 'BF', 'BG', 'BA', 'BB', 'WF', 'BL', 'BM', 'BN', 'BO', 'BH', 'BI', 'BJ', 'BT', 'JM', 'BV', 'BW', 'WS', 'BQ', 'BR', 'BS', 'JE', 'BY', 'BZ', 'RU', 'RW', 'RS', 'TL', 'RE', 'TM', 'TJ', 'RO', 'TK', 'GW', 'GU', 'GT', 'GS', 'GR', 'GQ', 'GP', 'JP', 'GY', 'GG', 'GF', 'GE', 'GD', 'GB', 'GA', 'SV', 'GN', 'GM', 'GL', 'GI', 'GH', 'OM', 'TN', 'JO', 'HR', 'HT', 'HU', 'HK', 'HN', 'HM', 'VE', 'PR', 'PS', 'PW', 'PT', 'SJ', 'PY', 'IQ', 'PA', 'PF', 'PG', 'PE', 'PK', 'PH', 'PN', 'PL', 'PM', 'ZM', 'EH', 'EE', 'EG', 'ZA', 'EC', 'IT', 'VN', 'SB', 'ET', 'SO', 'ZW', 'SA', 'ES', 'ER', 'ME', 'MD', 'MG', 'MF', 'MA', 'MC', 'UZ', 'MM', 'ML', 'MO', 'MN', 'MH', 'MK', 'MU', 'MT', 'MW', 'MV', 'MQ', 'MP', 'MS', 'MR', 'IM', 'UG', 'TZ', 'MY', 'MX', 'IL', 'FR', 'IO', 'SH', 'FI', 'FJ', 'FK', 'FM', 'FO', 'NI', 'NL', 'NO', 'NA', 'VU', 'NC', 'NE', 'NF', 'NG', 'NZ', 'NP', 'NR', 'NU', 'CK', 'XK', 'CI', 'CH', 'CO', 'CN', 'CM', 'CL', 'CC', 'CA', 'CG', 'CF', 'CD', 'CZ', 'CY', 'CX', 'CR', 'CW', 'CV', 'CU', 'SZ', 'SY', 'SX', 'KG', 'KE', 'SS', 'SR', 'KI', 'KH', 'KN', 'KM', 'ST', 'SK', 'KR', 'SI', 'KP', 'KW', 'SN', 'SM', 'SL', 'SC', 'KZ', 'KY', 'SG', 'SE', 'SD', 'DO', 'DM', 'DJ', 'DK', 'VG', 'DE', 'YE', 'DZ', 'US', 'UY', 'YT', 'UM', 'LB', 'LC', 'LA', 'TV', 'TW', 'TT', 'TR', 'LK', 'LI', 'LV', 'TO', 'LT', 'LU', 'LR', 'LS', 'TH', 'TF', 'TG', 'TD', 'TC', 'LY', 'VA', 'VC', 'AE', 'AD', 'AG', 'AF', 'AI', 'VI', 'IS', 'IR', 'AM', 'AL', 'AO', 'AQ', 'AS', 'AR', 'AU', 'AT', 'AW', 'IN', 'AX', 'AZ', 'IE', 'ID', 'UA', 'QA', 'MZ')
-		self.state_code = ('AL', 'AK', 'AS', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FM', 'FL', 'GA', 'GU', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MH', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'MP', 'OH', 'OK', 'OR', 'PW', 'PA', 'PR', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VI', 'VA', 'WA', 'WV', 'WI', 'WY')
-
-
 class Order:
 	def __init__(self):
 		self.request_dict = {}
 		self.request_dict['isTest'] = False
 		self.request_dict['carrierCode'] = ''
 		self.request_dict['serviceCode'] = ''
-		self.request_dict['from'] = {} 
+		self.request_dict['from'] = {} #{"countryCode": "US", "stateCode": "CA", "city": "Rancho Cucamonga", "addressLine1": "9370 7Th St, Ste G.", "zipCode": "91730"}}
 		self.request_dict['to'] = {}
 		self.request_dict['parcels'] = [{}]
+		self.shipping_price = {}	# {'serviceCode': price}
+		self.reference = ''
 
-class PriceEstimater():
-	def get_estimated_rate():
-		url = 'https://ezeeship.com/api/ezeeship-openapi/shipment/estimateRate'
+	# def set_package_code(self): _shipping_method
 
-		headers = {'Authorization': api_key, 'Content-Type': 'application/json'}
+	def populate_other_properties(self):
+		# Handle special address
+		to_address = self.request_dict['to']
+		if to_address == self.special_address:
+			self.shipping_price['fedex_ground'] = None
+			self.shipping_price['usps_priority'] = None
+			return
 
-		payload = ''''''
+		# Handle transformers
+		if 'kv' in self.reference.lower():
+			if '3kv' in self.reference.lower(): 	# 3kv
+				self.shipping_price['usps_first'] = None
+				self.request_dict['parcels'][0]['packageCode'] = 'thick_envelope'
+			else: 	# not 3kv
+				self.shipping_price['usps_priority'] = None
+				if 'x' in self.reference.lower(): 	# 2+ transformers, not 3kv
+					self.request_dict['parcels'][0]['packageCode'] = 'medium_flat_rate_box'
+				else: 	# just 1 transformer, not 3kv
+					self.request_dict['parcels'][0]['packageCode'] = 'flat_rate_envelope'
+			return
 
-		self.small = ['fedex_smartpost', 'usps_priority', 'ups_ground']   # 14" - 20"
-		self.big = ['usps_priority', 'ups_ground']   # 24"~
-		self.transformer = ['usps_priority']
-		self.trans_3kv = ['usps_first_class']
-		#json.dumps(test)
-		response = requests.post(url, headers = headers, data = payload)
-		response.json()
+		# Handle LED
+		if 'led' in self.reference.lower():
+			self.shipping_price['fedex_smart_post'] = None
+			self.shipping_price['usps_priority'] = None
+			self.shipping_price['usps_priority'] = None
+			return
+
+		# Handle neon sign
+		size = int(self.reference[1:3])
+		if size == 17 and self.request_dict['parcels'][0]['length'] == 18:	# 17", paper box
+			self.shipping_price['fedex_smart_post'] = None
+		else:
+			if not 'po box' in to_address['addressLine1'].lower():
+				self.shipping_price['ups_ground'] = None
+			if size <= 20:
+				self.shipping_price['fedex_smart_post'] = None
+				self.shipping_price['usps_priority'] = None
+			elif size >= 24 and size < 32:
+				self.shipping_price['usps_priority'] = None
+			else: 	# size >= 32
+				self.shipping_price['usps_parcel_select'] = None
+
+def get_estimated_rate():
+	url = 'https://ezeeship.com/api/ezeeship-openapi/shipment/estimateRate'
+
+	headers = {'Authorization': api_key, 'Content-Type': 'application/json'}
+
+	payload = ''''''
+
+	#json.dumps(test)
+	response = requests.post(url, headers = headers, data = payload)
+	response.json()
 
 class XlsReader():
 	def __init__(self, input_file, head_to_ignore = 1, sheet_number = 0):
@@ -141,9 +146,6 @@ class XlsReader():
 			recipient_info['addressLine1'] = recipient_address
 			recipient_info['zipCode'] = recipient_zipcode
 
-			print(sender_info)
-			print(recipient_info)
-
 			parcel_info = {}
 			parcel_info['packageNum'] = 1
 			parcel_info['length'] = length
@@ -152,7 +154,7 @@ class XlsReader():
 			parcel_info['distanceUnit'] = 'in'
 			parcel_info['weight'] = weight
 			parcel_info['massUnit'] = 'lb'
-			parcel_info['packageCode'] = ''
+			parcel_info['packageCode'] = 'your_package'
 			extra_info = {}
 			extra_info['insurance'] = insurance_amount if 
 			extra_info['isCod'] = True if is_cod else False
@@ -165,6 +167,7 @@ class XlsReader():
 			current_order.request_dict['from'] = sender_info
 			current_order.request_dict['to'] = recipient_info
 			current_order.request_dict['parcels'][0] = parcel_info
+			current_order.reference = reference
 
 			# validate datatype, make sure it meets requested format
 			# current_order.validate()
@@ -217,6 +220,8 @@ def main():
 		exit(2)
 
 	# Get price for orders
+	for order in orders:
+		get_estimated_rate(order)
 
 	# Write results to xls file
 
