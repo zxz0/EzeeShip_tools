@@ -3,7 +3,9 @@
 		save temp file, config file adoption
 	Author: Zixuan Zhang
 	Function: 
-		get best price among several shipping method for different orders according to several rules, output to csv file as the original order
+		parse xls to get order info,
+		get best price among several shipping method according to several rules, 
+		output to xls file following the original order
 	Usage: python compare.py products.csv
 """
 
@@ -14,7 +16,9 @@ import configparser
 import logging
 import sys
 import xlrd
+import xlwt
 import datetime
+import random
 
 class Order:
 	def __init__(self):
@@ -22,29 +26,27 @@ class Order:
 		self.request_dict['isTest'] = False
 		self.request_dict['carrierCode'] = ''
 		self.request_dict['serviceCode'] = ''
-		self.request_dict['from'] = {} #{"countryCode": "US", "stateCode": "CA", "city": "Rancho Cucamonga", "addressLine1": "9370 7Th St, Ste G.", "zipCode": "91730"}}
+		self.request_dict['from'] = {}
 		self.request_dict['to'] = {}
 		self.request_dict['parcels'] = [{}]
-		self.shipping_price = {}	# {'serviceCode': price}
+		self.shipping_rates = {}	# {'serviceCode': price}
 		self.reference = ''
-
-	# def set_package_code(self): _shipping_method
 
 	def populate_other_properties(self):
 		# Handle special address
 		to_address = self.request_dict['to']
-		if to_address == self.special_address:
-			self.shipping_price['fedex_ground'] = None
-			self.shipping_price['usps_priority'] = None
+		if to_address['zipCode'] == '41025' and to_address['addressLine1'] == '1850 Airport Exchange Blvd #200' and to_address['city'] == 'Erlanger' and to_address['stateCode'] == 'KY' and to_address['countryCode'] == 'countryCode':
+			self.shipping_rates['fedex_ground'] = None
+			self.shipping_rates['usps_priority'] = None
 			return
 
 		# Handle transformers
 		if 'kv' in self.reference.lower():
 			if '3kv' in self.reference.lower(): 	# 3kv
-				self.shipping_price['usps_first'] = None
+				self.shipping_rates['usps_first'] = None
 				self.request_dict['parcels'][0]['packageCode'] = 'thick_envelope'
 			else: 	# not 3kv
-				self.shipping_price['usps_priority'] = None
+				self.shipping_rates['usps_priority'] = None
 				if 'x' in self.reference.lower(): 	# 2+ transformers, not 3kv
 					self.request_dict['parcels'][0]['packageCode'] = 'medium_flat_rate_box'
 				else: 	# just 1 transformer, not 3kv
@@ -53,36 +55,41 @@ class Order:
 
 		# Handle LED
 		if 'led' in self.reference.lower():
-			self.shipping_price['fedex_smart_post'] = None
-			self.shipping_price['usps_priority'] = None
-			self.shipping_price['usps_priority'] = None
+			self.shipping_rates['fedex_smart_post'] = None
+			self.shipping_rates['usps_priority'] = None
+			self.shipping_rates['usps_priority'] = None
 			return
 
 		# Handle neon sign
 		size = int(self.reference[1:3])
 		if size == 17 and self.request_dict['parcels'][0]['length'] == 18:	# 17", paper box
-			self.shipping_price['fedex_smart_post'] = None
+			self.shipping_rates['fedex_smart_post'] = None
 		else:
 			if not 'po box' in to_address['addressLine1'].lower():
-				self.shipping_price['ups_ground'] = None
+				self.shipping_rates['ups_ground'] = None
 			if size <= 20:
-				self.shipping_price['fedex_smart_post'] = None
-				self.shipping_price['usps_priority'] = None
+				self.shipping_rates['fedex_smart_post'] = None
+				self.shipping_rates['usps_priority'] = None
 			elif size >= 24 and size < 32:
-				self.shipping_price['usps_priority'] = None
+				self.shipping_rates['usps_priority'] = None
 			else: 	# size >= 32
-				self.shipping_price['usps_parcel_select'] = None
+				self.shipping_rates['usps_parcel_select'] = None
 
-def get_estimated_rate():
-	url = 'https://ezeeship.com/api/ezeeship-openapi/shipment/estimateRate'
+
+def get_estimated_rate(api_key, payload):
+	'''url = 'https://ezeeship.com/api/ezeeship-openapi/shipment/estimateRate'
 
 	headers = {'Authorization': api_key, 'Content-Type': 'application/json'}
 
-	payload = ''''''
-
 	#json.dumps(test)
 	response = requests.post(url, headers = headers, data = payload)
-	response.json()
+	json_response = response.json()
+	if json_response['result'] != 'OK':
+		raise 
+	else:
+		return json_response['data']['rate']
+	'''
+	return random.randint(1,500)
 
 class XlsReader():
 	def __init__(self, input_file, head_to_ignore = 1, sheet_number = 0):
@@ -156,7 +163,7 @@ class XlsReader():
 			parcel_info['massUnit'] = 'lb'
 			parcel_info['packageCode'] = 'your_package'
 			extra_info = {}
-			extra_info['insurance'] = insurance_amount if 
+			extra_info['insurance'] = insurance_amount
 			extra_info['isCod'] = True if is_cod else False
 			extra_info['codAmount'] = 0
 			extra_info['paymentMethod'] = 'any'
@@ -219,12 +226,35 @@ def main():
 		logging.error('order file: {xls_file} not exist!'.format(xls_file = xls_file))
 		exit(2)
 
-	# Get price for orders
+	# Get prices for orders
 	for order in orders:
-		get_estimated_rate(order)
+		min_price = 500
+		min_shipping = ''
+		order.populate_other_properties()
+		for shipping_method in order.shipping_rates.keys():
+			order.request_dict['serviceCode'] = shipping_method
+			order.request_dict['carrierCode'] = shipping_method.split('_')[0]
+			try:
+				price = get_estimated_rate(api_key, json.dumps(order.request_dict))
+				order.shipping_rates[shipping_method] = price
+				if price < min_price:
+					min_price = price
+					min_shipping = shipping_method
+			except:
+				print("error message!")
+		order.request_dict['serviceCode'] = min_shipping
+		order.request_dict['carrierCode'] = min_shipping
 
 	# Write results to xls file
-
+	workbook = xlwt.Workbook()
+	sheet = workbook.add_sheet('Sheet 1')
+	for row_index, order in enumerate(orders):
+		row = [order.request_dict['serviceCode']]
+		for shipping_method, price in order.shipping_rates.items():
+			row.extend([shipping_method, price])
+		for i in range(len(row)):
+			sheet.write(row_index, i, row[i])
+	workbook.save('shipping_adviser.xls')
 
 if __name__ == "__main__":
 	main()
