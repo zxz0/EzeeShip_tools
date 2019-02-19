@@ -1,6 +1,6 @@
 """
 	Todo:
-		save temp file, config file adoption
+		save temp file, config file adoption, (test) structurize, modulization, packing
 	Author: Zixuan Zhang
 	Function: 
 		parse xls to get order info,
@@ -18,7 +18,23 @@ import sys
 import xlrd
 import xlwt
 import datetime
-import random
+
+class RequestError(Exception):
+    """Exception raised for errors during the request.
+
+    Attributes:
+        request:
+        	request producing the error
+        response:
+        	response given
+        message:
+        	error message, explanation of the error
+    """
+
+    def __init__(self, request, response, message):
+        self.request = request
+        self.response = response
+        self.message = message
 
 class Order:
 	def __init__(self):
@@ -29,7 +45,7 @@ class Order:
 		self.request_dict['from'] = {}
 		self.request_dict['to'] = {}
 		self.request_dict['parcels'] = [{}]
-		self.shipping_rates = {}	# {'serviceCode': price}
+		self.shipping_rates = {}	# {'serviceCode': rate}
 		self.reference = ''
 
 	def populate_other_properties(self):
@@ -77,19 +93,19 @@ class Order:
 
 
 def get_estimated_rate(api_key, payload):
-	'''url = 'https://ezeeship.com/api/ezeeship-openapi/shipment/estimateRate'
+	url = 'https://ezeeship.com/api/ezeeship-openapi/shipment/estimateRate'
 
 	headers = {'Authorization': api_key, 'Content-Type': 'application/json'}
 
-	#json.dumps(test)
+	logging.debug("Send request: {request}".format(request = payload))
 	response = requests.post(url, headers = headers, data = payload)
 	json_response = response.json()
-	if json_response['result'] != 'OK':
-		raise 
-	else:
+	logging.debug("Received response: {response}".format(response = json_response))
+	if json_response['result'] == 'OK':
 		return json_response['data']['rate']
-	'''
-	return random.randint(1,500)
+	elif json_response['result'] == 'ERR':
+		raise RequestError(payload, json_response, json_response['message'])
+	# other errors should have been handled by requests
 
 class XlsReader():
 	def __init__(self, input_file, head_to_ignore = 1, sheet_number = 0):
@@ -180,7 +196,8 @@ class XlsReader():
 			# current_order.validate()
 			# validate_address(current_order)
 			orders.append(current_order)
-			logging.info('get request dictionary: {request_dict}'.format(request_dict = current_order.request_dict))
+			logging.info('finished parsing line {line_num}'.format(line_num = row_idx + 1))
+			logging.debug('get request dictionary: {request_dict}'.format(request_dict = current_order.request_dict))
 
 		return orders
 
@@ -208,6 +225,7 @@ def main():
 	config_file = 'config.ini'
 
 	if os.path.isfile(config_file):
+		logging.info('Geting API key...')
 		config = configparser.ConfigParser()
 		config.read(config_file)
 		api_key = config.get('Keys', 'api_key')
@@ -220,14 +238,17 @@ def main():
 	xls_file = 'input.xls'
 	orders = []
 	if os.path.isfile(xls_file):
+		logging.info('Parsing xls file...')
 		xls_reader = XlsReader(xls_file)
 		orders = xls_reader.parse()
 	else:
 		logging.error('order file: {xls_file} not exist!'.format(xls_file = xls_file))
 		exit(2)
 
-	# Get prices for orders
-	for order in orders:
+	# Get rates for orders
+	logging.info('Estimating rates...')
+	for index, order in enumerate(orders):
+		logging.info('Estimating rates for row: {row_index}...'.format(row_index = index + 1))
 		min_price = 500
 		min_shipping = ''
 		order.populate_other_properties()
@@ -240,12 +261,13 @@ def main():
 				if price < min_price:
 					min_price = price
 					min_shipping = shipping_method
-			except:
-				print("error message!")
+			except RequestError as re:
+				logger.error('cannot get rate for row {row_num}: {reason}'.format(row_num = index + 1, reason = re.message))
 		order.request_dict['serviceCode'] = min_shipping
 		order.request_dict['carrierCode'] = min_shipping
 
 	# Write results to xls file
+	logging.info('Writing results...')
 	workbook = xlwt.Workbook()
 	sheet = workbook.add_sheet('Sheet 1')
 	for row_index, order in enumerate(orders):
