@@ -1,6 +1,6 @@
 """
 	Todo:
-		save temp file, config file adoption, (test) structurize, modulization, packing
+		save temp file, config file adoption, (test) structurize, modulization, packing (to exe), validate address before
 	Author: Zixuan Zhang
 	Function: 
 		parse xls to get order info,
@@ -86,7 +86,11 @@ class Order:
 			if size <= 20:
 				self.shipping_rates['fedex_smart_post'] = None
 				self.shipping_rates['usps_priority'] = None
-			elif size >= 24 and size < 32:
+				self.shipping_rates['fedex_home_delivery'] = None
+				self.shipping_rates['fedex_ground'] = None
+			elif size >= 24 and size < 32: 	# nothing between 20 and 24?
+				self.shipping_rates['fedex_home_delivery'] = None
+				self.shipping_rates['fedex_ground'] = None
 				self.shipping_rates['usps_priority'] = None
 			else: 	# size >= 32
 				self.shipping_rates['usps_parcel_select'] = None
@@ -262,7 +266,8 @@ def main():
 					min_price = price
 					min_shipping = shipping_method
 			except RequestError as re:
-				logger.error('cannot get rate for row {row_num}: {reason}'.format(row_num = index + 1, reason = re.message))
+				logging.error('cannot get rate for row {row_num}: {reason}'.format(row_num = index + 1, reason = re.message))
+				order.shipping_rates[shipping_method] = re.message
 		order.request_dict['serviceCode'] = min_shipping
 		order.request_dict['carrierCode'] = min_shipping
 
