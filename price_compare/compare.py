@@ -1,6 +1,6 @@
 """
 	Todo:
-		save temp file, config file adoption, (test) structurize, modulization, packing (to exe), validate address before
+		save temp file, config file adoption, (test) structurize, modulization, packing (to exe), validate address before, automatically revise, sort by key
 	Author: Zixuan Zhang
 	Function: 
 		parse xls to get order info,
@@ -51,7 +51,7 @@ class Order:
 	def populate_other_properties(self):
 		# Handle special address
 		to_address = self.request_dict['to']
-		if to_address['zipCode'] == '41025' and to_address['addressLine1'] == '1850 Airport Exchange Blvd #200' and to_address['city'] == 'Erlanger' and to_address['stateCode'] == 'KY' and to_address['countryCode'] == 'countryCode':
+		if to_address['zipCode'] == '41025' and to_address['addressLine1'] == '1850 Airport Exchange Blvd #200' and to_address['city'] == 'Erlanger' and to_address['stateCode'] == 'KY' and to_address['countryCode'] == 'US':
 			self.shipping_rates['fedex_ground'] = None
 			self.shipping_rates['usps_priority'] = None
 			return
@@ -73,7 +73,7 @@ class Order:
 		if 'led' in self.reference.lower():
 			self.shipping_rates['fedex_smart_post'] = None
 			self.shipping_rates['usps_priority'] = None
-			self.shipping_rates['usps_priority'] = None
+			# self.shipping_rates['ups_ground'] = None
 			return
 
 		# Handle neon sign
@@ -81,13 +81,15 @@ class Order:
 		if size == 17 and self.request_dict['parcels'][0]['length'] == 18:	# 17", paper box
 			self.shipping_rates['fedex_smart_post'] = None
 		else:
-			if not 'po box' in to_address['addressLine1'].lower():
-				self.shipping_rates['ups_ground'] = None
-			if size <= 20:
+			# if not 'po box' in to_address['addressLine1'].lower():
+			# 	self.shipping_rates['ups_ground'] = None
+			if size <= 17:
+				self.shipping_rates['fedex_smart_post'] = None
+			elif size <= 20:
 				self.shipping_rates['fedex_smart_post'] = None
 				self.shipping_rates['usps_priority'] = None
-				self.shipping_rates['fedex_home_delivery'] = None
-				self.shipping_rates['fedex_ground'] = None
+				# self.shipping_rates['fedex_home_delivery'] = None	# residential
+				# self.shipping_rates['fedex_ground'] = None			# commercial
 			elif size >= 24 and size < 32: 	# nothing between 20 and 24?
 				self.shipping_rates['fedex_home_delivery'] = None
 				self.shipping_rates['fedex_ground'] = None
@@ -95,6 +97,28 @@ class Order:
 			else: 	# size >= 32
 				self.shipping_rates['usps_parcel_select'] = None
 
+	def set_residential_commercial_method(self, is_residential_address):
+		if is_residential_address:
+			self.shipping_rates['fedex_home_delivery'] = None 	# residential
+			self.request_dict['to']['isResidential'] = True
+			self.request_dict['to']['isValie'] = True
+		else:
+			self.shipping_rates['fedex_ground'] = None			# commercial
+
+def is_residential(api_key, payload):
+	url = 'https://ezeeship.com/api/ezeeship-openapi/address/validate'
+
+	headers = {'Authorization': api_key, 'Content-Type': 'application/json'}
+
+	logging.debug("Send request: {request}".format(request = payload))
+	response = requests.post(url, headers = headers, data = payload)
+	json_response = response.json()
+	logging.debug("Received response: {response}".format(response = json_response))
+	if json_response['result'] == 'OK':
+		return json_response['data']['isResidential']
+	elif json_response['result'] == 'ERR':
+		raise RequestError(payload, json_response, json_response['message'])
+	# other errors should have been handled by requests
 
 def get_estimated_rate(api_key, payload):
 	url = 'https://ezeeship.com/api/ezeeship-openapi/shipment/estimateRate'
@@ -256,6 +280,11 @@ def main():
 		min_price = 500
 		min_shipping = ''
 		order.populate_other_properties()
+		try:
+			order.set_residential_commercial_method(is_residential(api_key, json.dumps(order.request_dict['to'])))
+		except RequestError as re:
+			logging.error('cannot get rate for row {row_num}: {reason}'.format(row_num = index + 1, reason = re.message))
+
 		for shipping_method in order.shipping_rates.keys():
 			order.request_dict['serviceCode'] = shipping_method
 			order.request_dict['carrierCode'] = shipping_method.split('_')[0]
