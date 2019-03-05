@@ -1,10 +1,16 @@
 """
 	Todo:
-		save temp file, config file adoption, (test) structurize, modulization, packing (to exe), validate address before, automatically revise, sort by key
+		save temp file
+		config file adoption
+		(test) structurize
+		modulization
+		packing (to exe)
+		log info and debug level files
+		drag and drop
 	Author: Zixuan Zhang
 	Function: 
 		parse xls to get order info,
-		get best price among several shipping method according to several rules, 
+		get best price among several shipping methods/services, 
 		output to xls file following the original order
 	Usage: python compare.py products.csv
 """
@@ -47,6 +53,7 @@ class Order:
 		self.request_dict['parcels'] = [{}]
 		self.shipping_rates = {}	# {'serviceCode': rate}
 		self.reference = ''
+		self.best_shipping_service = ''
 
 	def populate_other_properties(self):
 		# Handle special address
@@ -69,71 +76,60 @@ class Order:
 					self.request_dict['parcels'][0]['packageCode'] = 'flat_rate_envelope'
 			return
 
-		# Handle LED
-		if 'led' in self.reference.lower():
-			self.shipping_rates['fedex_smart_post'] = None
-			self.shipping_rates['usps_priority'] = None
-			# self.shipping_rates['ups_ground'] = None
-			return
-
-		# Handle neon sign
-		size = int(self.reference[1:3])
-		if size == 17 and self.request_dict['parcels'][0]['length'] == 18:	# 17", paper box
-			self.shipping_rates['fedex_smart_post'] = None
-		else:
-			# if not 'po box' in to_address['addressLine1'].lower():
-			# 	self.shipping_rates['ups_ground'] = None
-			if size <= 17:
-				self.shipping_rates['fedex_smart_post'] = None
-			elif size <= 20:
-				self.shipping_rates['fedex_smart_post'] = None
-				self.shipping_rates['usps_priority'] = None
-				# self.shipping_rates['fedex_home_delivery'] = None	# residential
-				# self.shipping_rates['fedex_ground'] = None			# commercial
-			elif size >= 24 and size < 32: 	# nothing between 20 and 24?
-				self.shipping_rates['fedex_home_delivery'] = None
-				self.shipping_rates['fedex_ground'] = None
-				self.shipping_rates['usps_priority'] = None
-			else: 	# size >= 32
-				self.shipping_rates['usps_parcel_select'] = None
+		# Handle signs
+		self.shipping_rates['fedex_smart_post'] = None
+		self.shipping_rates['usps_priority'] = None
+		self.shipping_rates['ups_ground'] = None
 
 	def set_residential_commercial_method(self, is_residential_address):
 		if is_residential_address:
 			self.shipping_rates['fedex_home_delivery'] = None 	# residential
 			self.request_dict['to']['isResidential'] = True
-			self.request_dict['to']['isValie'] = True
-		else:
-			self.shipping_rates['fedex_ground'] = None			# commercial
+			self.request_dict['to']['isValid'] = True
+		else: 	# commercial
+			self.shipping_rates['fedex_ground'] = None
+
+	def set_best_rate(self):
+		# just the lowest price
+		best_rate_tuple = min(self.shipping_rates.items(), key=lambda kv: kv[1] if isinstance(kv[1], float) else sys.float_info.max) 
+		self.best_shipping_service = best_rate_tuple[0]
+		# self.request_dict['carrierCode'] = get_carrier_code_from_service_code(self.request_dict['serviceCode'])
+
+def get_carrier_code_from_service_code(service_code):
+	return service_code.split('_')[0]
+
+def request_data(url, api_key, payload, result_key):
+	headers = {'Authorization': api_key, 'Content-Type': 'application/json'}
+	logging.debug("Send request: {request}".format(request = payload))
+	response = requests.post(url, headers = headers, data = payload)
+	json_response = response.json()
+	logging.debug("Received response: {response}".format(response = json_response))
+	if json_response['result'] == 'OK':
+		return json_response['data'][result_key]
+	elif json_response['result'] == 'ERR':
+		raise RequestError(payload, json_response, json_response['message'])
+	# other errors should have been handled by requests
 
 def is_residential(api_key, payload):
 	url = 'https://ezeeship.com/api/ezeeship-openapi/address/validate'
+	result_key = 'isResidential'
+	try:
+		residential_flag = request_data(url, api_key, payload, result_key)
+	except RequestError:
+		raise
 
-	headers = {'Authorization': api_key, 'Content-Type': 'application/json'}
-
-	logging.debug("Send request: {request}".format(request = payload))
-	response = requests.post(url, headers = headers, data = payload)
-	json_response = response.json()
-	logging.debug("Received response: {response}".format(response = json_response))
-	if json_response['result'] == 'OK':
-		return json_response['data']['isResidential']
-	elif json_response['result'] == 'ERR':
-		raise RequestError(payload, json_response, json_response['message'])
-	# other errors should have been handled by requests
+	return residential_flag
+	
 
 def get_estimated_rate(api_key, payload):
 	url = 'https://ezeeship.com/api/ezeeship-openapi/shipment/estimateRate'
+	result_key = 'rate'
+	try:
+		rate = request_data(url, api_key, payload, result_key)
+	except RequestError:
+		raise
 
-	headers = {'Authorization': api_key, 'Content-Type': 'application/json'}
-
-	logging.debug("Send request: {request}".format(request = payload))
-	response = requests.post(url, headers = headers, data = payload)
-	json_response = response.json()
-	logging.debug("Received response: {response}".format(response = json_response))
-	if json_response['result'] == 'OK':
-		return json_response['data']['rate']
-	elif json_response['result'] == 'ERR':
-		raise RequestError(payload, json_response, json_response['message'])
-	# other errors should have been handled by requests
+	return rate
 
 class XlsReader():
 	def __init__(self, input_file, head_to_ignore = 1, sheet_number = 0):
@@ -273,40 +269,40 @@ def main():
 		logging.error('order file: {xls_file} not exist!'.format(xls_file = xls_file))
 		exit(2)
 
-	# Get rates for orders
+	# Validate and get rates for orders
 	logging.info('Estimating rates...')
 	for index, order in enumerate(orders):
 		logging.info('Estimating rates for row: {row_index}...'.format(row_index = index + 1))
-		min_price = 500
-		min_shipping = ''
 		order.populate_other_properties()
-		try:
-			order.set_residential_commercial_method(is_residential(api_key, json.dumps(order.request_dict['to'])))
-		except RequestError as re:
-			logging.error('cannot get rate for row {row_num}: {reason}'.format(row_num = index + 1, reason = re.message))
 
+		# Validate address
+		try:
+			residential_flag = is_residential(api_key, json.dumps(order.request_dict['to']))
+			order.set_residential_commercial_method(residential_flag)
+		except RequestError as re:
+			logging.error('failed to pass validation in row {row_num}: {reason}'.format(row_num = index + 1, reason = re.message))
+
+		# Get rates
 		for shipping_method in order.shipping_rates.keys():
 			order.request_dict['serviceCode'] = shipping_method
-			order.request_dict['carrierCode'] = shipping_method.split('_')[0]
+			order.request_dict['carrierCode'] = get_carrier_code_from_service_code(shipping_method)
 			try:
 				price = get_estimated_rate(api_key, json.dumps(order.request_dict))
 				order.shipping_rates[shipping_method] = price
-				if price < min_price:
-					min_price = price
-					min_shipping = shipping_method
 			except RequestError as re:
 				logging.error('cannot get rate for row {row_num}: {reason}'.format(row_num = index + 1, reason = re.message))
 				order.shipping_rates[shipping_method] = re.message
-		order.request_dict['serviceCode'] = min_shipping
-		order.request_dict['carrierCode'] = min_shipping
+		# order.set_best_rate()
 
 	# Write results to xls file
 	logging.info('Writing results...')
 	workbook = xlwt.Workbook()
 	sheet = workbook.add_sheet('Sheet 1')
 	for row_index, order in enumerate(orders):
-		row = [order.request_dict['serviceCode']]
-		for shipping_method, price in order.shipping_rates.items():
+		# Sort the shipping price dictionary, put best in the front, put error message at the end
+		sorted_rates = sorted(order.shipping_rates.items(), key=lambda kv: kv[1] if isinstance(kv[1], float) else sys.float_info.max)
+		row = [sorted_rates[0][0]]	# best shipping service (with lowest price)
+		for shipping_method, price in sorted_rates:
 			row.extend([shipping_method, price])
 		for i in range(len(row)):
 			sheet.write(row_index, i, row[i])
