@@ -1,12 +1,10 @@
 """
 	Todo:
 		save temp file
-		config file adoption
 		(test) structurize
 		modulization
 		packing (to exe)
 		log info and debug level files
-		drag and drop
 	Author: Zixuan Zhang
 	Function: 
 		parse xls to get order info,
@@ -24,6 +22,9 @@ import sys
 import xlrd
 import xlwt
 import datetime
+from optparse import OptionParser
+
+CURRENT_VERSION = '0.8.0'
 
 class RequestError(Exception):
     """Exception raised for errors during the request.
@@ -243,15 +244,23 @@ def set_logger():
 def main():
 	# Initinalization
 	set_logger()
-	
+
+	# Get (possible) arguments
+	usage = 'usage: %prog [-options <argument>]'
+	parser = OptionParser(usage = usage, version = '%prog {}'.format(CURRENT_VERSION))
+	parser.set_defaults(config_file = 'config.ini', xls_file = 'input.xls')
+	parser.add_option('-c', '--config', type = 'string', dest = 'config_file', help = 'use CONFIG_FILE to specify the API key merge', metavar = 'CONFIG_FILE')
+	parser.add_option('-f', '--xls-file', type = 'string', dest = 'xls_file', help = 'use XLS_FILE as the uploaded xls file', metavar = 'XLS_FILE')
+
+	(options, args) = parser.parse_args()
+	logging.debug('using config file: {config_file} to processe {data_file}'.format(config_file = options.config_file, data_file = options.xls_file))
+
 	# Get API key from config file
 	api_key = ''
-	config_file = 'config.ini'
-
-	if os.path.isfile(config_file):
+	if os.path.isfile(options.config_file):
 		logging.info('Geting API key...')
 		config = configparser.ConfigParser()
-		config.read(config_file)
+		config.read(options.config_file)
 		api_key = config.get('Keys', 'api_key')
 		logging.debug('Get API key: {api_key}'.format(api_key = api_key))
 	else:
@@ -259,11 +268,10 @@ def main():
 		exit(2)
 
 	# Get order info from xls file
-	xls_file = 'input.xls'
 	orders = []
-	if os.path.isfile(xls_file):
+	if os.path.isfile(options.xls_file):
 		logging.info('Parsing xls file...')
-		xls_reader = XlsReader(xls_file)
+		xls_reader = XlsReader(options.xls_file)
 		orders = xls_reader.parse()
 	else:
 		logging.error('order file: {xls_file} not exist!'.format(xls_file = xls_file))
