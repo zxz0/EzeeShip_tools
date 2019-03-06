@@ -248,12 +248,13 @@ def main():
 	# Get (possible) arguments
 	usage = 'usage: %prog [-options <argument>]'
 	parser = OptionParser(usage = usage, version = '%prog {}'.format(CURRENT_VERSION))
-	parser.set_defaults(config_file = 'config.ini', xls_file = 'input.xls')
-	parser.add_option('-c', '--config', type = 'string', dest = 'config_file', help = 'use CONFIG_FILE to specify the API key merge', metavar = 'CONFIG_FILE')
-	parser.add_option('-f', '--xls-file', type = 'string', dest = 'xls_file', help = 'use XLS_FILE as the uploaded xls file', metavar = 'XLS_FILE')
+	parser.set_defaults(config_file = 'config.ini', input_file = 'input.xls', dest_file = 'shipping_adviser.xls')
+	parser.add_option('-c', '--config', type = 'string', dest = 'config_file', help = 'use CONFIG_FILE to specify the API key', metavar = 'CONFIG_FILE')
+	parser.add_option('-s', '--source', type = 'string', dest = 'input_file', help = 'read INPUT_XLS_FILE to load data', metavar = 'INPUT_XLS_FILE')
+	parser.add_option('-d', '--dest', type = 'string', dest = 'dest_file', help = 'save rates information to OUTPUT_XLS_FILE', metavar = 'OUTPUT_XLS_FILE')
 
 	(options, args) = parser.parse_args()
-	logging.debug('using config file: {config_file} to processe {data_file}'.format(config_file = options.config_file, data_file = options.xls_file))
+	logging.debug('using config file: {config_file} to processe {data_file}'.format(config_file = options.config_file, data_file = options.input_file, dest_file = options.dest_file))
 
 	# Get API key from config file
 	api_key = ''
@@ -264,17 +265,17 @@ def main():
 		api_key = config.get('Keys', 'api_key')
 		logging.debug('Get API key: {api_key}'.format(api_key = api_key))
 	else:
-		logging.error('config file: {config_file} not exist!'.format(config_file = config_file))
+		logging.error('config file: {config_file} not exist!'.format(config_file = options.config_file))
 		exit(2)
 
 	# Get order info from xls file
 	orders = []
-	if os.path.isfile(options.xls_file):
+	if os.path.isfile(options.input_file):
 		logging.info('Parsing xls file...')
-		xls_reader = XlsReader(options.xls_file)
+		xls_reader = XlsReader(options.input_file)
 		orders = xls_reader.parse()
 	else:
-		logging.error('order file: {xls_file} not exist!'.format(xls_file = xls_file))
+		logging.error('order file: {xls_file} not exist!'.format(xls_file = options.input_file))
 		exit(2)
 
 	# Validate and get rates for orders
@@ -314,7 +315,7 @@ def main():
 			row.extend([shipping_method, price])
 		for i in range(len(row)):
 			sheet.write(row_index, i, row[i])
-	workbook.save('shipping_adviser.xls')
+	workbook.save(options.dest_file)
 
 if __name__ == "__main__":
 	main()
