@@ -10,7 +10,7 @@ IF [%1] EQU [] (
 	rem python3 only for python2 pre-installed system, like Linux, Mac, ...
 ) ELSE (
 	rem running with drag-and-drop file as input data file. even if not under the same folder
-	cd /d %~dp0
+	cd /d "%~dp0"
 	python compare.py -s "%~1"
 )
 

@@ -55,7 +55,9 @@ class Order:
 		self.shipping_rates = {}	# {'serviceCode': rate}
 		self.reference = ''
 		self.best_shipping_service = ''
+		self.is_residential_address = False
 
+	# Mainly the shipping method and package
 	def populate_other_properties(self):
 		# Handle special address
 		to_address = self.request_dict['to']
@@ -65,25 +67,35 @@ class Order:
 			return
 
 		# Handle transformers
-		if 'kv' in self.reference.lower():
-			if '3kv' in self.reference.lower(): 	# 3kv
-				self.shipping_rates['usps_first'] = None
-				self.request_dict['parcels'][0]['packageCode'] = 'thick_envelope'
+		lower_reference = self.reference.lower()
+		if 'kv' in lower_reference:
+			if '3kv' in lower_reference: 	# 3kv
+				if 'x' not in lower_reference or 'x 2' in lower_reference or 'x2' in lower_reference:	# <= 2 (num), < 1lb
+					self.shipping_rates['usps_first'] = None
+					self.request_dict['parcels'][0]['packageCode'] = 'thick_envelope'
+				else:
+					self.shipping_rates['usps_priority'] = None
+					self.request_dict['parcels'][0]['packageCode'] = 'flat_rate_envelope'
 			else: 	# not 3kv
 				self.shipping_rates['usps_priority'] = None
-				if 'x' in self.reference.lower(): 	# 2+ transformers, not 3kv
-					self.request_dict['parcels'][0]['packageCode'] = 'medium_flat_rate_box'
+				if 'x' in lower_reference: 	# 2+ transformers, not 3kv
+					if 'x 2' in lower_reference or 'x2' in lower_reference:	# 2 (num)
+						self.request_dict['parcels'][0]['packageCode'] = 'medium_flat_rate_box'
+					else:
+						self.request_dict['parcels'][0]['packageCode'] = 'large_flat_rate_box'
 				else: 	# just 1 transformer, not 3kv
 					self.request_dict['parcels'][0]['packageCode'] = 'flat_rate_envelope'
 			return
 
 		# Handle signs
+		if float(self.request_dict['parcels'][0]['weight'].strip()) < 1:	# parts
+			self.shipping_rates['usps_first'] = None
+			return
+
 		self.shipping_rates['fedex_smart_post'] = None
 		self.shipping_rates['usps_priority'] = None
 		self.shipping_rates['ups_ground'] = None
-
-	def set_residential_commercial_method(self, is_residential_address):
-		if is_residential_address:
+		if self.is_residential_address:
 			self.shipping_rates['fedex_home_delivery'] = None 	# residential
 			self.request_dict['to']['isResidential'] = True
 			self.request_dict['to']['isValid'] = True
@@ -282,15 +294,15 @@ def main():
 	logging.info('Estimating rates...')
 	for index, order in enumerate(orders):
 		logging.info('Estimating rates for row: {row_index}...'.format(row_index = index + 1))
-		order.populate_other_properties()
 
 		# Validate address
 		try:
 			residential_flag = is_residential(api_key, json.dumps(order.request_dict['to']))
-			order.set_residential_commercial_method(residential_flag)
+			order.is_residential_address = residential_flag
 		except RequestError as re:
 			logging.error('failed to pass validation in row {row_num}: {reason}'.format(row_num = index + 1, reason = re.message))
 
+		order.populate_other_properties()
 		# Get rates
 		for shipping_method in order.shipping_rates.keys():
 			order.request_dict['serviceCode'] = shipping_method
