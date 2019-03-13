@@ -1,6 +1,6 @@
 """
 	Todo:
-		save temp file
+		save temp file (per block or per record: need unique identifier. considering row change... instead of start to request from beginning)
 		(test) structurize
 		modulization
 		packing (to exe)
@@ -23,6 +23,8 @@ import xlrd
 import xlwt
 import datetime
 from optparse import OptionParser
+import traceback
+import re
 
 CURRENT_VERSION = '0.8.0'
 
@@ -117,7 +119,10 @@ def request_data(url, api_key, payload, result_key):
 	response = requests.post(url, headers = headers, data = payload)
 	json_response = response.json()
 	logging.debug("Received response: {response}".format(response = json_response))
-	if json_response['result'] == 'OK':
+
+	if 'result' not in json_response:
+		raise RequestError(payload, json_response, 'cannot get response! seems like internet problem')
+	elif json_response['result'] == 'OK':
 		return json_response['data'][result_key]
 	elif json_response['result'] == 'ERR':
 		raise RequestError(payload, json_response, json_response['message'])
@@ -162,79 +167,86 @@ class XlsReader():
 		workbook = xlrd.open_workbook(self.input_file)
 		sheetbooksheet = workbook.sheet_by_index(self.sheet_number)
 
+		logging.info('ignore head until row {row_num}'.format(row_num = self.head_to_ignore))
 		for row_idx in range(self.head_to_ignore, sheetbooksheet.nrows):	# Ignore the head
 			current_row = sheetbooksheet.row(row_idx)
 			current_order = Order()
 
 			# get info from the columns with correct format
-			reference = current_row[2].value.strip()
+			try:
+				logging.info('parsing row {row_num}'.format(row_num = row_idx + 1))
+				reference = current_row[2].value.strip()
 
-			sender_country = current_row[5].value.strip()
-			sender_address = current_row[7].value.strip()
-			sender_city = current_row[9].value.strip()
-			sender_state = current_row[10].value.strip()
-			sender_zipcode = current_row[11].value.strip() if current_row[11].ctype == xlrd.book.XL_CELL_TEXT else str(int(current_row[11].value))
+				sender_country = current_row[5].value.strip()
+				sender_address = current_row[7].value.strip()
+				sender_city = current_row[9].value.strip()
+				sender_state = current_row[10].value.strip()
+				sender_zipcode = current_row[11].value.strip() if current_row[11].ctype == xlrd.book.XL_CELL_TEXT else str(int(current_row[11].value))
 
-			recipient_country = current_row[16].value.strip()
-			recipient_address = current_row[18].value.strip()
-			recipient_city = current_row[20].value.strip()
-			recipient_state = current_row[21].value.strip()
-			recipient_zipcode = current_row[22].value.strip() if current_row[22].ctype == xlrd.book.XL_CELL_TEXT else str(int(current_row[22].value))
+				recipient_country = current_row[16].value.strip()
+				recipient_address = current_row[18].value.strip()
+				recipient_city = current_row[20].value.strip()
+				recipient_state = current_row[21].value.strip()
+				recipient_zipcode = current_row[22].value.strip() if current_row[22].ctype == xlrd.book.XL_CELL_TEXT else str(int(current_row[22].value))
 
-			is_cod = current_row[26].value
-			cod_amount = current_row[27].value if current_row[27].ctype == xlrd.book.XL_CELL_NUMBER else 0
+				is_cod = current_row[26].value
+				cod_amount = current_row[27].value if current_row[27].ctype == xlrd.book.XL_CELL_NUMBER else 0
 
-			length = str(current_row[29].value)
-			width = str(current_row[30].value)
-			height = str(current_row[31].value)
-			weight = str(current_row[32].value)
+				length = str(current_row[29].value)
+				width = str(current_row[30].value)
+				height = str(current_row[31].value)
+				weight = str(current_row[32].value)
 
-			insurance_amount = current_row[34].value if current_row[34].ctype == xlrd.book.XL_CELL_NUMBER else 0
+				insurance_amount = current_row[34].value if current_row[34].ctype == xlrd.book.XL_CELL_NUMBER else 0
+                
+				# structurize
+				sender_info = {}
+				sender_info['countryCode'] = sender_country
+				sender_info['stateCode'] = sender_state
+				sender_info['city'] = sender_city
+				sender_info['addressLine1'] = sender_address
+				sender_info['zipCode'] = sender_zipcode
 
-			# structurize
-			sender_info = {}
-			sender_info['countryCode'] = sender_country
-			sender_info['stateCode'] = sender_state
-			sender_info['city'] = sender_city
-			sender_info['addressLine1'] = sender_address
-			sender_info['zipCode'] = sender_zipcode
+				recipient_info = {}
+				recipient_info['countryCode'] = recipient_country
+				recipient_info['stateCode'] = recipient_state
+				recipient_info['city'] = recipient_city
+				recipient_info['addressLine1'] = recipient_address
+				recipient_info['zipCode'] = recipient_zipcode
 
-			recipient_info = {}
-			recipient_info['countryCode'] = recipient_country
-			recipient_info['stateCode'] = recipient_state
-			recipient_info['city'] = recipient_city
-			recipient_info['addressLine1'] = recipient_address
-			recipient_info['zipCode'] = recipient_zipcode
+				parcel_info = {}
+				parcel_info['packageNum'] = 1
+				parcel_info['length'] = length
+				parcel_info['width'] = width
+				parcel_info['height'] = height
+				parcel_info['distanceUnit'] = 'in'
+				parcel_info['weight'] = weight
+				parcel_info['massUnit'] = 'lb'
+				parcel_info['packageCode'] = 'your_package'
+				extra_info = {}
+				extra_info['insurance'] = insurance_amount
+				extra_info['isCod'] = True if is_cod else False
+				extra_info['codAmount'] = 0
+				extra_info['paymentMethod'] = 'any'
+				extra_info['dryIceWeight'] = 0
+				parcel_info['extra'] = extra_info
 
-			parcel_info = {}
-			parcel_info['packageNum'] = 1
-			parcel_info['length'] = length
-			parcel_info['width'] = width
-			parcel_info['height'] = height
-			parcel_info['distanceUnit'] = 'in'
-			parcel_info['weight'] = weight
-			parcel_info['massUnit'] = 'lb'
-			parcel_info['packageCode'] = 'your_package'
-			extra_info = {}
-			extra_info['insurance'] = insurance_amount
-			extra_info['isCod'] = True if is_cod else False
-			extra_info['codAmount'] = 0
-			extra_info['paymentMethod'] = 'any'
-			extra_info['dryIceWeight'] = 0
-			parcel_info['extra'] = extra_info
+				# populate the order instance
+				current_order.request_dict['from'] = sender_info
+				current_order.request_dict['to'] = recipient_info
+				current_order.request_dict['parcels'][0] = parcel_info
+				current_order.reference = reference
 
-			# populate the order instance
-			current_order.request_dict['from'] = sender_info
-			current_order.request_dict['to'] = recipient_info
-			current_order.request_dict['parcels'][0] = parcel_info
-			current_order.reference = reference
-
-			# validate datatype, make sure it meets requested format
-			# current_order.validate()
-			# validate_address(current_order)
-			orders.append(current_order)
-			logging.info('finished parsing line {line_num}'.format(line_num = row_idx + 1))
-			logging.debug('get request dictionary: {request_dict}'.format(request_dict = current_order.request_dict))
+				# validate datatype, make sure it meets requested format
+				# current_order.validate()
+				orders.append(current_order)
+				logging.debug('get request dictionary: {request_dict}'.format(request_dict = current_order.request_dict))
+			except ValueError as ve:
+				traceback_info = traceback.format_exc()
+				variable_name = re.search('(\w+) =', traceback_info)[1]
+				column_index = re.search('\[(\d{1,2})]', traceback_info)[1]
+				logging.error('wrong value for row {row_num}({row_info}), column {column_num}({column_meaning}): {cell_value}'.format(column_num = int(column_index) + 1, column_meaning = variable_name.replace('_', ' '), row_num = row_idx + 1, row_info = reference, cell_value = current_row[int(column_index)].value.strip()))
+				exit()
 
 		return orders
 
