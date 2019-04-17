@@ -28,6 +28,26 @@ import re
 
 CURRENT_VERSION = '0.8.0'
 
+rules = {}
+rules['Shipping'] = {}
+rules['Packing'] = {}
+
+rules['Shipping']["forward_address"] = []
+rules['Shipping']["3kv_1_or_2"] = []
+rules['Shipping']["3kv_3_or_more"] = []
+rules['Shipping']["other_transformer"] = []
+rules['Shipping']["parts"] = []
+rules['Shipping']["normal"] = []
+rules['Shipping']["residential_additional"] = []
+rules['Shipping']["commercial_additional"] = []
+
+rules['Packing']["3kv_1_or_2"] = ''
+rules['Packing']["3kv_3_or_more"] = ''
+rules['Packing']["other_trans_1"] = ''
+rules['Packing']["other_trans_2"] = ''
+rules['Packing']["other_trans_3_or_more"] = ''
+rules['Packing']["others"] = ''
+
 class RequestError(Exception):
     """Exception raised for errors during the request.
 
@@ -73,36 +93,42 @@ class Order:
 		if 'kv' in lower_reference:
 			if '3kv' in lower_reference: 	# 3kv
 				if 'x' not in lower_reference or 'x 2' in lower_reference or 'x2' in lower_reference:	# <= 2 (num), < 1lb
-					self.shipping_rates['usps_first'] = None
-					self.request_dict['parcels'][0]['packageCode'] = 'thick_envelope'
+					for shipping_method in rules['Shipping']['3kv_1_or_2']:
+						self.shipping_rates[shipping_method] = None 	# usps_first
+					self.request_dict['parcels'][0]['packageCode'] = rules['Packing']['3kv_1_or_2'] 	# thick_envelope
 				else:
-					self.shipping_rates['usps_priority'] = None
-					self.request_dict['parcels'][0]['packageCode'] = 'flat_rate_envelope'
+					for shipping_method in rules['Shipping']['3kv_3_or_more']:
+						self.shipping_rates[shipping_method] = None 	# usps_priority
+					self.request_dict['parcels'][0]['packageCode'] = rules['Packing']['3kv_3_or_more'] 	# flat_rate_envelope
 			else: 	# not 3kv
-				self.shipping_rates['usps_priority'] = None
-				if 'x' in lower_reference: 	# 2+ transformers, not 3kv
-					if 'x 2' in lower_reference or 'x2' in lower_reference:	# 2 (num)
-						self.request_dict['parcels'][0]['packageCode'] = 'medium_flat_rate_box'
+				for shipping_method in rules['Shipping']['other_transformer']:
+						self.shipping_rates[shipping_method] = None 	# usps_priority
+				if 'x' in lower_reference or '+' in lower_reference: 	# 2+ transformers, not 3kv
+					if 'x 2' in lower_reference or 'x2' in lower_reference or lower_reference.count('+') == 1:	# 2 (num)
+						self.request_dict['parcels'][0]['packageCode'] = rules['Packing']['other_trans_2'] 	# medium_flat_rate_box
 					else:
-						self.request_dict['parcels'][0]['packageCode'] = 'large_flat_rate_box'
+						self.request_dict['parcels'][0]['packageCode'] = rules['Packing']['other_trans_3_or_more'] 	# large_flat_rate_box
 				else: 	# just 1 transformer, not 3kv
-					self.request_dict['parcels'][0]['packageCode'] = 'flat_rate_envelope'
+					self.request_dict['parcels'][0]['packageCode'] = rules['Packing']['other_trans_1'] 	# flat_rate_envelope
 			return
 
 		# Handle signs
 		if float(self.request_dict['parcels'][0]['weight'].strip()) < 1:	# parts
-			self.shipping_rates['usps_first'] = None
+			for shipping_method in rules['Shipping']['parts']:
+				self.shipping_rates[shipping_method] = None 	# usps_first
 			return
 
-		self.shipping_rates['fedex_smart_post'] = None
-		self.shipping_rates['usps_priority'] = None
-		self.shipping_rates['ups_ground'] = None
-		if self.is_residential_address:
-			self.shipping_rates['fedex_home_delivery'] = None 	# residential
+		for shipping_method in rules['Shipping']['normal']:
+			self.shipping_rates[shipping_method] = None 	# fedex_smart_post,usps_priority,ups_ground
+
+		if self.is_residential_address: # residential
+			for shipping_method in rules['Shipping']['residential_additional']:
+				self.shipping_rates[shipping_method] = None 	# fedex_home_delivery
 			self.request_dict['to']['isResidential'] = True
 			self.request_dict['to']['isValid'] = True
 		else: 	# commercial
-			self.shipping_rates['fedex_ground'] = None
+			for shipping_method in rules['Shipping']['commercial_additional']:
+				self.shipping_rates[shipping_method] = None 	# fedex_ground
 
 	def set_best_rate(self):
 		# just the lowest price
@@ -121,7 +147,7 @@ def request_data(url, api_key, payload, result_key):
 	logging.debug("Received response: {response}".format(response = json_response))
 
 	if 'result' not in json_response:
-		raise RequestError(payload, json_response, 'cannot get response! seems like internet problem')
+		raise RequestError(payload, json_response, 'cannot get proper response! seems like internet problem')
 	elif json_response['result'] == 'OK':
 		return json_response['data'][result_key]
 	elif json_response['result'] == 'ERR':
@@ -222,7 +248,7 @@ class XlsReader():
 				parcel_info['distanceUnit'] = 'in'
 				parcel_info['weight'] = weight
 				parcel_info['massUnit'] = 'lb'
-				parcel_info['packageCode'] = 'your_package'
+				parcel_info['packageCode'] = rules['Packing']["others"] # 'your_package'
 				extra_info = {}
 				extra_info['insurance'] = insurance_amount
 				extra_info['isCod'] = True if is_cod else False
@@ -245,8 +271,8 @@ class XlsReader():
 				traceback_info = traceback.format_exc()
 				variable_name = re.search('(\w+) =', traceback_info)[1]
 				column_index = re.search('\[(\d{1,2})]', traceback_info)[1]
-				logging.error('wrong value for row {row_num}({row_info}), column {column_num}({column_meaning}): {cell_value}'.format(column_num = int(column_index) + 1, column_meaning = variable_name.replace('_', ' '), row_num = row_idx + 1, row_info = reference, cell_value = current_row[int(column_index)].value.strip()))
-				exit()
+				logging.error('wrong value for row {row_num}({row_info}), column {column_num}({column_meaning}): {cell_value}'.format(column_num = int(column_index) + 1, column_meaning = variable_name.replace('_', ' '), row_num = row_idx + 1, row_info = reference, cell_value = current_row[int(column_index)].value))
+				exit(2)
 
 		return orders
 
@@ -280,14 +306,31 @@ def main():
 	(options, args) = parser.parse_args()
 	logging.debug('using config file: {config_file} to processe {data_file}'.format(config_file = options.config_file, data_file = options.input_file, dest_file = options.dest_file))
 
-	# Get API key from config file
+	# Get API key, shipping rules, packing rules from config file
 	api_key = ''
 	if os.path.isfile(options.config_file):
-		logging.info('Geting API key...')
-		config = configparser.ConfigParser()
-		config.read(options.config_file)
-		api_key = config.get('Keys', 'api_key')
-		logging.debug('Get API key: {api_key}'.format(api_key = api_key))
+		try:
+			logging.info('Reading config file...')
+			config = configparser.ConfigParser()
+			config.read(options.config_file)
+
+			logging.info('Geting API key...')
+			api_key = config.get('Keys', 'api_key')
+			logging.debug('Get API key: {api_key}'.format(api_key = api_key))
+
+			logging.info('Geting rules...')
+			for key, value in rules['Shipping'].items():
+				rules['Shipping'][key] = [delivery_method.strip() for delivery_method in config.get('Shipping', key).split(',')]
+			for key, value in rules['Packing'].items():
+				rules['Packing'][key] = config.get('Packing', key)
+				if ',' in rules['Packing'][key]:
+					logging.error('multiple packing options not allowed')
+					exit(2)
+			logging.debug(rules)
+		except configparser.NoOptionError as noe:
+			logging.error(noe)
+			exit(2)
+		
 	else:
 		logging.error('config file: {config_file} not exist!'.format(config_file = options.config_file))
 		exit(2)
