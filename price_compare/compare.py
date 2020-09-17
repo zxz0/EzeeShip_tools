@@ -3,7 +3,6 @@
 		save temp file (per block or per record: need unique identifier. considering row change... instead of start to request from beginning)
 		(test) structurize
 		modulization
-		packing (to exe)
 		log info and debug level files
 	Author: Zixuan Zhang
 	Function: 
@@ -26,7 +25,7 @@ from optparse import OptionParser
 import traceback
 import re
 
-CURRENT_VERSION = '0.8.0'
+CURRENT_VERSION = '2.0.0'
 
 rules = {}
 rules['Shipping'] = {}
@@ -47,6 +46,28 @@ rules['Packing']["other_trans_1"] = ''
 rules['Packing']["other_trans_2"] = ''
 rules['Packing']["other_trans_3_or_more"] = ''
 rules['Packing']["others"] = ''
+
+apply_desung_rules = True
+
+positions = {}
+positions['reference'] = 0
+positions['sender_country'] = 0
+positions['sender_address'] = 0
+positions['sender_city'] = 0
+positions['sender_state'] = 0
+positions['sender_zipcode'] = 0
+positions['recipient_country'] = 0
+positions['recipient_address'] = 0
+positions['recipient_city'] = 0
+positions['recipient_state'] = 0
+positions['recipient_zipcode'] = 0
+positions['is_cod'] = 0
+positions['cod_amount'] = 0
+positions['length'] = 0
+positions['width'] = 0
+positions['height'] = 0
+positions['weight'] = 0
+positions['insurance_amount'] = 0
 
 class RequestError(Exception):
     """Exception raised for errors during the request.
@@ -139,6 +160,9 @@ class Order:
 def get_carrier_code_from_service_code(service_code):
 	return service_code.split('_')[0]
 
+def get_clear_cell_number_str(cell):
+	return cell.value.strip() if cell.ctype == xlrd.book.XL_CELL_TEXT else str(int(cell.value))
+
 def request_data(url, api_key, payload, result_key):
 	headers = {'Authorization': api_key, 'Content-Type': 'application/json'}
 	logging.debug("Send request: {request}".format(request = payload))
@@ -201,29 +225,29 @@ class XlsReader():
 			# get info from the columns with correct format
 			try:
 				logging.info('parsing row {row_num}'.format(row_num = row_idx + 1))
-				reference = current_row[2].value.strip()
+				reference = current_row[positions['reference']].value.strip()
 
-				sender_country = current_row[5].value.strip()
-				sender_address = current_row[7].value.strip()
-				sender_city = current_row[9].value.strip()
-				sender_state = current_row[10].value.strip()
-				sender_zipcode = current_row[11].value.strip() if current_row[11].ctype == xlrd.book.XL_CELL_TEXT else str(int(current_row[11].value))
+				sender_country = current_row[positions['sender_country']].value.strip()
+				sender_address = current_row[positions['sender_address']].value.strip()
+				sender_city = current_row[positions['sender_city']].value.strip()
+				sender_state = current_row[positions['sender_state']].value.strip()
+				sender_zipcode = get_clear_cell_number_str(current_row[positions['sender_zipcode']])
 
-				recipient_country = current_row[16].value.strip()
-				recipient_address = current_row[18].value.strip()
-				recipient_city = current_row[20].value.strip()
-				recipient_state = current_row[21].value.strip()
-				recipient_zipcode = current_row[22].value.strip() if current_row[22].ctype == xlrd.book.XL_CELL_TEXT else str(int(current_row[22].value))
+				recipient_country = current_row[positions['recipient_country']].value.strip()
+				recipient_address = current_row[positions['recipient_address']].value.strip()
+				recipient_city = current_row[positions['recipient_city']].value.strip()
+				recipient_state = current_row[positions['recipient_state']].value.strip()
+				recipient_zipcode = get_clear_cell_number_str(current_row[positions['recipient_zipcode']])
 
-				is_cod = current_row[26].value
-				cod_amount = current_row[27].value if current_row[27].ctype == xlrd.book.XL_CELL_NUMBER else 0
+				is_cod = current_row[positions['is_cod']].value
+				cod_amount = current_row[positions['cod_amount']].value if current_row[positions['cod_amount']].ctype == xlrd.book.XL_CELL_NUMBER else 0
 
-				length = str(current_row[29].value)
-				width = str(current_row[30].value)
-				height = str(current_row[31].value)
-				weight = str(current_row[32].value)
+				length = str(current_row[positions['length']].value)
+				width = str(current_row[positions['width']].value)
+				height = str(current_row[positions['height']].value)
+				weight = str(current_row[positions['weight']].value)
 
-				insurance_amount = current_row[34].value if current_row[34].ctype == xlrd.book.XL_CELL_NUMBER else 0
+				insurance_amount = current_row[positions['insurance_amount']].value if current_row[positions['insurance_amount']].ctype == xlrd.book.XL_CELL_NUMBER else 0
                 
 				# structurize
 				sender_info = {}
@@ -276,6 +300,22 @@ class XlsReader():
 
 		return orders
 
+# sorted_rates, rule[0], rule[1], rule[2]);
+def apply_rule(rates, delivery_method, compared_with, price_diff):
+	compared_with_all_flag = (compared_with.lower() == 'all')
+	for i in range(len(rates)):
+		current_method = rates[i][0]
+		current_rate = rates[i][1]
+		current_pos = i
+
+		if delivery_method == current_method:
+			# compare all tags later (may have leap diff, so cannot only compare the next)
+			for j in range(i + 1, lent(rates)):
+				if compared_with_all_flag or compared_with in rates[j][0]: # if this is the one we want to compare
+					if (rates[j][1] - current_rate < price_diff): 	# if price meet criteria
+						rates[i], rates[j] = rates[j], rates[i] 	# switch
+					break # if switched, end (only switch the first one, or problem happends for other equality?); if price not compatible: end
+
 def set_logger():
 	folder = './logs'
 	if not os.path.isdir(folder):
@@ -306,7 +346,7 @@ def main():
 	(options, args) = parser.parse_args()
 	logging.debug('using config file: {config_file} to processe {data_file}'.format(config_file = options.config_file, data_file = options.input_file, dest_file = options.dest_file))
 
-	# Get API key, shipping rules, packing rules from config file
+	# Get API key, shipping rules, packing rules, sorting method, spreadsheet column position from config file
 	api_key = ''
 	if os.path.isfile(options.config_file):
 		try:
@@ -319,6 +359,7 @@ def main():
 			logging.debug('Get API key: {api_key}'.format(api_key = api_key))
 
 			logging.info('Geting rules...')
+			global rules
 			for key, value in rules['Shipping'].items():
 				rules['Shipping'][key] = [delivery_method.strip() for delivery_method in config.get('Shipping', key).split(',')]
 			for key, value in rules['Packing'].items():
@@ -327,6 +368,17 @@ def main():
 					logging.error('multiple packing options not allowed')
 					exit(2)
 			logging.debug(rules)
+
+			logging.info('Geting sorting method...')
+			global apply_desung_rules
+			apply_desung_rules = config.getboolean('Sorting', 'apply_desung_rules')
+			logging.debug('Get sorting method: apply desung rules? {apply_desung_rules}'.format(apply_desung_rules = apply_desung_rules))
+
+			logging.info('Geting positions...')
+			global positions
+			for key, value in positions.items():
+				positions[key] = config.getint('Position', key) - 1
+			logging.debug(positions)
 		except configparser.NoOptionError as noe:
 			logging.error(noe)
 			exit(2)
@@ -377,6 +429,14 @@ def main():
 	for row_index, order in enumerate(orders):
 		# Sort the shipping price dictionary, put best in the front, put error message at the end
 		sorted_rates = sorted(order.shipping_rates.items(), key=lambda kv: kv[1] if isinstance(kv[1], float) else sys.float_info.max)
+		rules = [['fedex_smart_post', 'all', 0.5], ['usps', 'fedex', 0.5]]
+		# others - fedex_smart_post < 0.5: smart post
+		# USPS - fedex_smart_post < 0.5: USPS
+		for rule in rules:
+			apply_rule(sorted_rates, rule[0], rule[1], rule[2]);
+		if sorted_rates[0][0] == 'fedex_smart_post':
+			if sorted_rates[0][1] and (sorted_rates[1][1] - sorted_rates[0][1] < 0.5):
+				sorted_rates[0], sorted_rates[1] = sorted_rates[1], sorted_rates[0]
 		row = [sorted_rates[0][0]]	# best shipping service (with lowest price)
 		for shipping_method, price in sorted_rates:
 			row.extend([shipping_method, price])
